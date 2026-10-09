@@ -155,6 +155,7 @@ with col_main:
             frame_placeholder.image(
                 cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
                 channels="RGB",
+                output_format="JPEG",
                 use_container_width=True,
             )
             metric_placeholder.metric("Vozil na sliki", n_smooth)
