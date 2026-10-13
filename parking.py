@@ -4,6 +4,7 @@ import os
 import statistics
 import tempfile
 from collections import deque
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -32,6 +33,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 BOX_COLOR = (0, 200, 0)  # BGR
 MAX_W = 1280             # največja širina frama za obdelavo
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+VIDEO_EXT = (".mp4", ".avi", ".mov", ".mkv")
+BASE_DIR = Path(__file__).resolve().parent
 
 
 @st.cache_resource
@@ -114,6 +117,21 @@ def resize_frame(frame):
     return frame
 
 
+def find_video_dir():
+    """Mapa Video v repozitoriju (ne glede na velikost začetnice)."""
+    for d in BASE_DIR.iterdir():
+        if d.is_dir() and d.name.lower() == "video":
+            return d
+    return None
+
+
+VIDEO_DIR = find_video_dir()
+REPO_VIDEOS = (
+    sorted(p.name for p in VIDEO_DIR.iterdir() if p.suffix.lower() in VIDEO_EXT)
+    if VIDEO_DIR
+    else []
+)
+
 # Glavno okno (levo) in nastavitve (desno)
 col_main, col_settings = st.columns([4, 1])
 
@@ -177,13 +195,27 @@ def annotate(frame, boxes, ids, n):
 
 
 with col_main:
-    uploaded = st.file_uploader(
-        "Naloži video ali sliko",
-        type=["mp4", "avi", "mov", "mkv", "jpg", "jpeg", "png", "bmp", "webp"],
-    )
+    # Vir: video iz mape Video v repozitoriju ali lastna naložena datoteka
+    source = "Naloži datoteko"
+    if REPO_VIDEOS:
+        source = st.radio(
+            "Vir", ["Video iz mape Video", "Naloži datoteko"], horizontal=True
+        )
 
-    if uploaded:
-        is_image = uploaded.name.lower().endswith(IMAGE_EXT)
+    uploaded = None
+    repo_path = None
+    if source == "Video iz mape Video":
+        chosen = st.selectbox("Izberi video", REPO_VIDEOS)
+        if st.button("▶ Začni obdelavo", type="primary"):
+            repo_path = VIDEO_DIR / chosen
+    else:
+        uploaded = st.file_uploader(
+            "Naloži video ali sliko",
+            type=["mp4", "avi", "mov", "mkv", "jpg", "jpeg", "png", "bmp", "webp"],
+        )
+
+    if uploaded is not None or repo_path is not None:
+        is_image = uploaded is not None and uploaded.name.lower().endswith(IMAGE_EXT)
 
         col_video, col_stats = st.columns([3, 1])
         with col_video:
@@ -236,12 +268,16 @@ with col_main:
 
         else:
             # ---------- VIDEO (sledenje + prihodi/odhodi) ----------
-            tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-            tfile.write(uploaded.read())
-            tfile.flush()
-            tfile.close()
+            if repo_path is not None:
+                video_file = str(repo_path)
+            else:
+                tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+                tfile.write(uploaded.read())
+                tfile.flush()
+                tfile.close()
+                video_file = tfile.name
 
-            cap = cv2.VideoCapture(tfile.name)
+            cap = cv2.VideoCapture(video_file)
             total = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 1)
 
             frame_idx = 0
@@ -309,10 +345,11 @@ with col_main:
                     )
 
             cap.release()
-            try:
-                os.unlink(tfile.name)
-            except OSError:
-                pass
+            if repo_path is None:  # začasno datoteko brišemo samo pri naloženih videih
+                try:
+                    os.unlink(video_file)
+                except OSError:
+                    pass
 
             progress.progress(1.0)
             st.success(
